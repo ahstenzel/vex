@@ -2,7 +2,7 @@
  vex.h
 
  Cross-platform single-header C99 argument parsing library.
- 
+
  Written by Alex Stenzel (alexhstenzel@gmail.com) 2025.
  */
 #ifndef VEX_H
@@ -10,6 +10,9 @@
 
 #ifdef __cplusplus
 extern "C" {
+#define CPPCAST(s) (s)
+#else
+#define CPPCAST(s)
 #endif
 
 #include <stdlib.h>
@@ -45,9 +48,9 @@ extern "C" {
 #endif
 
 typedef struct {
-	char* name;
-	char* version;
-	char* description;
+	const char* name;
+	const char* version;
+	const char* description;
 } vex_init_info;
 
 typedef union {
@@ -69,6 +72,7 @@ typedef struct {
 	char* long_name;
 	char short_name;
 	int arg_type;
+	int max_count;
 } vex_arg_desc;
 
 typedef struct {
@@ -96,7 +100,7 @@ int vex_token_count(vex_ctx* ctx);
 
 vex_arg_token* vex_get_token(vex_ctx* ctx, int num);
 
-bool vex_arg_found(vex_ctx* ctx, char* name);
+bool vex_arg_found(vex_ctx* ctx, const char* name);
 
 void vex_free(vex_ctx* ctx);
 
@@ -115,20 +119,19 @@ bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value);
 #ifdef VEX_IMPLEMENTATION
 
 vex_ctx vex_init(vex_init_info init_info) {
-	vex_ctx ctx = {
-		.name = _vex_strdup(init_info.name),
-		.help_msg = NULL,
-		.status_msg = NULL,
-		.description = _vex_strdup(init_info.description),
-		.version = _vex_strdup(init_info.version),
-		.arg_desc = NULL,
-		.num_arg_desc = 0,
-		.capacity_arg_desc = 0,
-		.arg_token = NULL,
-		.num_arg_token = 0,
-		.capacity_arg_token = 0,
-		.status = VEX_STATUS_OK
-	};
+	vex_ctx ctx = { 0 };
+	ctx.name = _vex_strdup(init_info.name);
+	ctx.help_msg = NULL;
+	ctx.status_msg = NULL;
+	ctx.description = _vex_strdup(init_info.description);
+	ctx.version = _vex_strdup(init_info.version);
+	ctx.arg_desc = NULL;
+	ctx.num_arg_desc = 0;
+	ctx.capacity_arg_desc = 0;
+	ctx.arg_token = NULL;
+	ctx.num_arg_token = 0;
+	ctx.capacity_arg_token = 0;
+	ctx.status = VEX_STATUS_OK;
 
 	// Validate
 	if (!ctx.name || !ctx.description || !ctx.version) {
@@ -137,20 +140,20 @@ vex_ctx vex_init(vex_init_info init_info) {
 	}
 
 	// Add default arguments
-	vex_arg_desc arg_help_flag = {
-		.arg_type = VEX_ARG_TYPE_FLAG,
-		.long_name = "help",
-		.short_name = 'h',
-		.description = "Print this help message"
-	};
+	vex_arg_desc arg_help_flag = { 0 };
+	arg_help_flag.arg_type = VEX_ARG_TYPE_FLAG;
+	arg_help_flag.long_name = "help";
+	arg_help_flag.short_name = 'h';
+	arg_help_flag.description = "Print this help message";
+	arg_help_flag.max_count = 0;
 	vex_add_arg(&ctx, arg_help_flag);
 
-	vex_arg_desc arg_ver_flag = {
-		.arg_type = VEX_ARG_TYPE_FLAG,
-		.long_name = "version",
-		.short_name = 'v',
-		.description = "Print the version string"
-	};
+	vex_arg_desc arg_ver_flag = { 0 };
+	arg_ver_flag.arg_type = VEX_ARG_TYPE_FLAG;
+	arg_ver_flag.long_name = "version";
+	arg_ver_flag.short_name = 'v';
+	arg_ver_flag.description = "Print the version string";
+	arg_ver_flag.max_count = 0;
 	vex_add_arg(&ctx, arg_ver_flag);
 
 	return ctx;
@@ -185,7 +188,7 @@ bool vex_add_arg(vex_ctx* ctx, vex_arg_desc desc) {
 	while (ctx->num_arg_desc >= ctx->capacity_arg_desc) {
 		int new_capacity = ctx->capacity_arg_desc * 2;
 		new_capacity += (new_capacity == 0);
-		vex_arg_desc* temp = VEX_REALLOC(ctx->arg_desc, new_capacity * sizeof(*temp));
+		vex_arg_desc* temp = CPPCAST(vex_arg_desc*)VEX_REALLOC(ctx->arg_desc, new_capacity * sizeof(*temp));
 		if (!temp) {
 			_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
 			return false;
@@ -200,6 +203,7 @@ bool vex_add_arg(vex_ctx* ctx, vex_arg_desc desc) {
 	ctx->arg_desc[ctx->num_arg_desc].short_name = desc.short_name;
 	ctx->arg_desc[ctx->num_arg_desc].long_name = _vex_strdup(desc.long_name);
 	ctx->arg_desc[ctx->num_arg_desc].description = _vex_strdup(desc.description);
+	ctx->arg_desc[ctx->num_arg_desc].max_count = desc.max_count;
 	ctx->num_arg_desc++;
 	if (ctx->help_msg) VEX_FREE(ctx->help_msg);
 	ctx->help_msg = NULL;
@@ -213,12 +217,14 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 	ctx->capacity_arg_token = 0;
 
 	// Parse arguments
+	int last_desc = -1;
 	int last_token = -1;
+	int token_count = 0;
 	bool parse_options = true;
 	for (int a = 1; a < argc; ++a) {
 		char* arg = argv[a];
 		if (!arg) continue;
-		
+
 		// Disable further option parsing
 		if (strcmp(arg, "--") == 0) {
 			parse_options = false;
@@ -227,7 +233,9 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 
 		// Parse options
 		if (parse_options && arg[0] == '-') {
+			last_desc = -1;
 			last_token = -1;
+			token_count = 0;
 			if (arg[1] == '-') {
 				vex_arg_token token = { 0 };
 
@@ -238,6 +246,7 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 						token.short_name = ctx->arg_desc[d].short_name;
 						token.long_name = _vex_strdup(ctx->arg_desc[d].long_name);
 						token.arg_type = ctx->arg_desc[d].arg_type;
+						last_desc = d;
 						break;
 					}
 				}
@@ -265,6 +274,7 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 				// Save to buffer
 				if (!_vex_add_token(ctx, token)) return false;
 				last_token = ctx->num_arg_token - 1;
+				token_count++;
 			}
 			else {
 				// Short option
@@ -278,6 +288,7 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 							token.short_name = ctx->arg_desc[d].short_name;
 							token.long_name = _vex_strdup(ctx->arg_desc[d].long_name);
 							token.arg_type = ctx->arg_desc[d].arg_type;
+							last_desc = d;
 							break;
 						}
 					}
@@ -307,6 +318,7 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 						// Save to buffer
 						if (!_vex_add_token(ctx, token)) return false;
 						last_token = ctx->num_arg_token - 1;
+						token_count++;
 					}
 				}
 			}
@@ -329,7 +341,13 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 				}
 			}
 
-			if (parse_options && last_token >= 0) {
+			bool group_with_last_token = false;
+			if (last_token >= 0) {
+				vex_arg_desc* desc = &ctx->arg_desc[last_desc];
+				vex_arg_token* token = &ctx->arg_token[last_token];
+				if (desc->max_count < 0 || token->arg_count < desc->max_count) group_with_last_token = true;
+			}
+			if (parse_options && group_with_last_token) {
 				// Add to last parsed option
 				vex_value value = { 0 };
 				vex_arg_token* token = &ctx->arg_token[last_token];
@@ -356,6 +374,8 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 				}
 				if (!_vec_token_add_value(ctx, &token, value)) return false;
 				if (!_vex_add_token(ctx, token)) return false;
+				last_token = -1;
+				last_desc = -1;
 			}
 		}
 	}
@@ -371,7 +391,7 @@ vex_arg_token* vex_get_token(vex_ctx* ctx, int num) {
 	return &ctx->arg_token[num];
 }
 
-bool vex_arg_found(vex_ctx* ctx, char* name) {
+bool vex_arg_found(vex_ctx* ctx, const char* name) {
 	if (!name) return false;
 	for (int i = 0; i < vex_token_count(ctx); ++i) {
 		vex_arg_token* token = vex_get_token(ctx, i);
@@ -397,7 +417,7 @@ void vex_free(vex_ctx* ctx) {
 			VEX_FREE(token.long_name);
 			if (token.arg_type == VEX_ARG_TYPE_STR) {
 				for (int j = 0; j < token.arg_count; ++j) {
-					VEX_FREE(token.arg->str_arg);
+					VEX_FREE(token.arg[j].str_arg);
 				}
 			}
 			VEX_FREE(token.arg);
@@ -425,13 +445,13 @@ const char* vex_get_help(vex_ctx* ctx) {
 	if (ctx->description) buffer_len += strlen(ctx->description);
 	size_t max_arg_len = 0;
 	for (int i = 0; i < ctx->num_arg_desc; ++i) {
-		size_t arg_len = 12;
-		if (ctx->arg_desc[i].long_name) arg_len += strlen(ctx->arg_desc[i].long_name);	
-		max_arg_len = max(max_arg_len, arg_len);
+		size_t arg_len = 16;
+		if (ctx->arg_desc[i].long_name) arg_len += strlen(ctx->arg_desc[i].long_name);
+		max_arg_len = (arg_len > max_arg_len) ? arg_len : max_arg_len;
 		if (ctx->arg_desc[i].description) buffer_len += strlen(ctx->arg_desc[i].description);
 	}
 	buffer_len += (2 * ctx->num_arg_desc * max_arg_len) + 1;
-	char* buffer = VEX_MALLOC(buffer_len);
+	char* buffer = CPPCAST(char*)VEX_MALLOC(buffer_len);
 	if (!buffer) return NULL;
 	sprintf_s(buffer, buffer_len, "Usage: %s", ctx->name);
 
@@ -449,7 +469,7 @@ const char* vex_get_help(vex_ctx* ctx) {
 			strcat_s(buffer, buffer_len, desc->long_name);
 		}
 		strcat_s(buffer, buffer_len, "] ");
-		if (desc->arg_type != VEX_ARG_TYPE_FLAG) strcat_s(buffer, buffer_len, "... ");
+		if (desc->arg_type != VEX_ARG_TYPE_FLAG && desc->max_count != 0) strcat_s(buffer, buffer_len, "... ");
 	}
 	strcat_s(buffer, buffer_len, "\n\n");
 
@@ -501,7 +521,7 @@ const char* vex_get_help(vex_ctx* ctx) {
 char* _vex_strdup(const char* str) {
 	if (!str) return NULL;
 	size_t len = strlen(str);
-	char* dst = VEX_MALLOC(len + 1);
+	char* dst = CPPCAST(char*)VEX_MALLOC(len + 1);
 	if (!dst) return NULL;
 	memcpy(dst, str, len + 1);
 	return dst;
@@ -512,7 +532,7 @@ bool _vex_add_token(vex_ctx* ctx, vex_arg_token token) {
 	while (ctx->num_arg_token >= ctx->capacity_arg_token) {
 		int new_capacity = ctx->capacity_arg_token * 2;
 		new_capacity += (new_capacity == 0);
-		vex_arg_token* temp = VEX_REALLOC(ctx->arg_token, new_capacity * sizeof(*temp));
+		vex_arg_token* temp = CPPCAST(vex_arg_token*)VEX_REALLOC(ctx->arg_token, new_capacity * sizeof(*temp));
 		if (!temp) {
 			_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
 			return false;
@@ -531,7 +551,7 @@ void _vex_set_status(vex_ctx* ctx, int status, char* fmt, ...) {
 	ctx->status = status;
 	if (status != VEX_STATUS_OK && status != VEX_STATUS_BAD_ALLOC && fmt) {
 		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
-		ctx->status_msg = VEX_MALLOC(256);
+		ctx->status_msg = CPPCAST(char*)VEX_MALLOC(256);
 		va_list args;
 		va_start(args, fmt);
 		vsnprintf(ctx->status_msg, 256, fmt, args);
@@ -545,7 +565,7 @@ void _vex_set_status(vex_ctx* ctx, int status, char* fmt, ...) {
 
 bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value) {
 	// Resize token value buffer
-	vex_value* temp = VEX_REALLOC(token->arg, (token->arg_count + 1) * sizeof(*token->arg));
+	vex_value* temp = CPPCAST(vex_value*)VEX_REALLOC(token->arg, (token->arg_count + 1) * sizeof(*token->arg));
 	if (!temp) {
 		_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
 		return false;

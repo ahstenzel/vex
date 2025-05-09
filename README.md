@@ -18,6 +18,15 @@ All you need to do is include the `vex.h` in your build. Optionally you can incl
 ### CMake
 This repo is set up in such a way that you can include it as a git submodule, then integrate it into your CMake build with `add_subdirectory`. In this case, it will generate a library file (`libvex`) with the function definitions- meaning you won't have to define `VEX_IMPLEMENTATION`, just include the header.
 
+Two options are also provided to control how the library is compiled: 
+ * `VEX_BUILD_SHARED` to build as a shared library (defaults to `ON` if `BUILD_SHARED_LIBS` is `ON`, otherwise defaults to `OFF`)
+ * `VEX_BUILD_CPP` to build the C++ interface (defaults to `OFF`).
+```
+set(VEX_BUILD_SHARED OFF) # Build static library
+set(VEX_BUILD_CPP ON)     # Build C++ wrapper
+add_subdirectory(vex)
+```
+
 ## Usage
 ### Basic example
 The following is an example of the basic workflow of this library. 
