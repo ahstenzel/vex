@@ -23,6 +23,12 @@ extern "C" {
 #include <ctype.h>
 #include <string.h>
 
+// Pre-C11 function aliases
+#if !defined(__STDC_LIB_EXT1__)
+#define strcat_s(dest, destsz, src) strcat(dest, src)
+#define strncat_s(dest, destsz, src, n) strncat(dest, src, n)
+#endif
+
 // Argument types
 #define VEX_ARG_TYPE_UNKNOWN 0
 #define VEX_ARG_TYPE_FLAG 1
@@ -453,7 +459,7 @@ const char* vex_get_help(vex_ctx* ctx) {
 	buffer_len += (2 * ctx->num_arg_desc * max_arg_len) + 1;
 	char* buffer = CPPCAST(char*)VEX_MALLOC(buffer_len);
 	if (!buffer) return NULL;
-	sprintf_s(buffer, buffer_len, "Usage: %s", ctx->name);
+	snprintf(buffer, buffer_len, "Usage: %s", ctx->name);
 
 	// Add args to usage
 	for (int i = 0; i < ctx->num_arg_desc; ++i) {
