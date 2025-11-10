@@ -1,4 +1,5 @@
-cmake_dependent_option(VEX_BUILD_SHARED "Build as a shared library" ON ${BUILD_SHARED_LIBS} OFF)
+include(CMakeDependentOption)
+cmake_dependent_option(VEX_BUILD_SHARED "Build as a shared library" ON "BUILD_SHARED_LIBS" OFF)
 option(VEX_BUILD_CPP "Build C++ interface wrapper" OFF)
 
 if(VEX_BUILD_CPP)
@@ -8,9 +9,9 @@ else()
 endif()
 
 if (VEX_BUILD_SHARED)
-	add_library(libvex SHARED ${SOURCES})
+	add_library(vex SHARED ${SOURCES})
 else()
-	add_library(libvex STATIC ${SOURCES})
+	add_library(vex STATIC ${SOURCES})
 endif()
 
-target_include_directories(include)
+target_include_directories(vex PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")

@@ -118,7 +118,7 @@ char* _vex_strdup(const char* str);
 
 bool _vex_add_token(vex_ctx* ctx, vex_arg_token token);
 
-void _vex_set_status(vex_ctx* ctx, int status, char* fmt, ...);
+void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...);
 
 bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value);
 
@@ -148,17 +148,17 @@ vex_ctx vex_init(vex_init_info init_info) {
 	// Add default arguments
 	vex_arg_desc arg_help_flag = { 0 };
 	arg_help_flag.arg_type = VEX_ARG_TYPE_FLAG;
-	arg_help_flag.long_name = "help";
+	arg_help_flag.long_name = _vex_strdup("help");
 	arg_help_flag.short_name = 'h';
-	arg_help_flag.description = "Print this help message";
+	arg_help_flag.description = _vex_strdup("Print this help message");
 	arg_help_flag.max_count = 0;
 	vex_add_arg(&ctx, arg_help_flag);
 
 	vex_arg_desc arg_ver_flag = { 0 };
 	arg_ver_flag.arg_type = VEX_ARG_TYPE_FLAG;
-	arg_ver_flag.long_name = "version";
+	arg_ver_flag.long_name = _vex_strdup("version");
 	arg_ver_flag.short_name = 'v';
-	arg_ver_flag.description = "Print the version string";
+	arg_ver_flag.description = _vex_strdup("Print the version string");
 	arg_ver_flag.max_count = 0;
 	vex_add_arg(&ctx, arg_ver_flag);
 
@@ -553,7 +553,7 @@ bool _vex_add_token(vex_ctx* ctx, vex_arg_token token) {
 	return true;
 }
 
-void _vex_set_status(vex_ctx* ctx, int status, char* fmt, ...) {
+void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...) {
 	ctx->status = status;
 	if (status != VEX_STATUS_OK && status != VEX_STATUS_BAD_ALLOC && fmt) {
 		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
