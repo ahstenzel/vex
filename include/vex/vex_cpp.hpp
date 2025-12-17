@@ -201,7 +201,7 @@ vex::vex(const std::string& name, const std::string& version, const std::string 
 	info.name = name.c_str();
 	info.version = version.c_str();
 	info.description = description.c_str();
-	ctx = vex_init(info);
+	vex_init(&ctx, info);
 }
 
 vex::~vex() {

@@ -29,6 +29,34 @@ extern "C" {
 #define strncat_s(dest, destsz, src, n) strncat(dest, src, n)
 #endif
 
+// Symbol exporting
+#if defined(VEX_BUILD_SHARED)
+	#if defined(_MSC_VER)
+		#define VEX_EXPORT __declspec(dllexport)
+		#define VEX_IMPORT __declspec(dllimport)
+	#elif defined(__GNUC__)
+		#define VEX_EXPORT __attribute__((visibility("default")))
+		#define VEX_IMPORT
+	#elif defined(__clang__)
+		#define VEX_EXPORT __attribute__((dllexport))
+		#define VEX_IMPORT __attribute__((dllimport))
+	#else
+		#define VEX_EXPORT
+		#define VEX_IMPORT
+		#pragma warning Unknown dynamic link import/export semantics.
+	#endif
+
+	#if defined(VEX_IMPLEMENTATION)
+		#define VEX_API VEX_EXPORT
+	#else
+		#define VEX_API VEX_IMPORT
+	#endif
+#else
+	#define VEX_EXPORT
+	#define VEX_IMPORT
+	#define VEX_API
+#endif
+
 // Argument types
 #define VEX_ARG_TYPE_UNKNOWN 0
 #define VEX_ARG_TYPE_FLAG 1
@@ -96,53 +124,102 @@ typedef struct {
 	int status;
 } vex_ctx;
 
-vex_ctx vex_init(vex_init_info init_info);
+VEX_API bool vex_init(vex_ctx* ctx, vex_init_info init_info);
 
-bool vex_add_arg(vex_ctx* ctx, vex_arg_desc desc);
+VEX_API bool vex_add_arg(vex_ctx* ctx, vex_arg_desc desc);
 
-bool vex_parse(vex_ctx* ctx, int argc, char** argv);
+VEX_API bool vex_parse(vex_ctx* ctx, int argc, char** argv);
 
-int vex_token_count(vex_ctx* ctx);
+VEX_API int vex_token_count(vex_ctx* ctx);
 
-vex_arg_token* vex_get_token(vex_ctx* ctx, int num);
+VEX_API vex_arg_token* vex_get_token(vex_ctx* ctx, int num);
 
-bool vex_arg_found(vex_ctx* ctx, const char* name);
+VEX_API bool vex_arg_found(vex_ctx* ctx, const char* name);
 
-void vex_free(vex_ctx* ctx);
+VEX_API void vex_free(vex_ctx* ctx);
 
-const char* vex_get_version(vex_ctx* ctx);
+VEX_API const char* vex_get_version(vex_ctx* ctx);
 
-const char* vex_get_help(vex_ctx* ctx);
-
-char* _vex_strdup(const char* str);
-
-bool _vex_add_token(vex_ctx* ctx, vex_arg_token token);
-
-void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...);
-
-bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value);
+VEX_API const char* vex_get_help(vex_ctx* ctx);
 
 #ifdef VEX_IMPLEMENTATION
 
-vex_ctx vex_init(vex_init_info init_info) {
-	vex_ctx ctx = { 0 };
-	ctx.name = _vex_strdup(init_info.name);
-	ctx.help_msg = NULL;
-	ctx.status_msg = NULL;
-	ctx.description = _vex_strdup(init_info.description);
-	ctx.version = _vex_strdup(init_info.version);
-	ctx.arg_desc = NULL;
-	ctx.num_arg_desc = 0;
-	ctx.capacity_arg_desc = 0;
-	ctx.arg_token = NULL;
-	ctx.num_arg_token = 0;
-	ctx.capacity_arg_token = 0;
-	ctx.status = VEX_STATUS_OK;
+static char* _vex_strdup(const char* str) {
+	if (!str) return NULL;
+	size_t len = strlen(str);
+	char* dst = CPPCAST(char*)VEX_MALLOC(len + 1);
+	if (!dst) return NULL;
+	memcpy(dst, str, len + 1);
+	return dst;
+}
+
+static bool _vex_add_token(vex_ctx* ctx, vex_arg_token token) {
+	// Resize arg token buffer if needed
+	while (ctx->num_arg_token >= ctx->capacity_arg_token) {
+		int new_capacity = ctx->capacity_arg_token * 2;
+		new_capacity += (new_capacity == 0);
+		vex_arg_token* temp = CPPCAST(vex_arg_token*)VEX_REALLOC(ctx->arg_token, new_capacity * sizeof(*temp));
+		if (!temp) {
+			_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
+			return false;
+		}
+		memset(&temp[ctx->capacity_arg_token], 0, (new_capacity - ctx->capacity_arg_token) * sizeof(*temp));
+		ctx->arg_token = temp;
+		ctx->capacity_arg_token = new_capacity;
+	}
+
+	// Save to buffer
+	ctx->arg_token[ctx->num_arg_token++] = token;
+	return true;
+}
+
+static void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...) {
+	ctx->status = status;
+	if (status != VEX_STATUS_OK && status != VEX_STATUS_BAD_ALLOC && fmt) {
+		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
+		ctx->status_msg = CPPCAST(char*)VEX_MALLOC(256);
+		va_list args;
+		va_start(args, fmt);
+		vsnprintf(ctx->status_msg, 256, fmt, args);
+		va_end(args);
+	}
+	else {
+		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
+		ctx->status_msg = NULL;
+	}
+}
+
+static bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value) {
+	// Resize token value buffer
+	vex_value* temp = CPPCAST(vex_value*)VEX_REALLOC(token->arg, (token->arg_count + 1) * sizeof(*token->arg));
+	if (!temp) {
+		_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
+		return false;
+	}
+	token->arg = temp;
+	token->arg[token->arg_count++] = value;
+	return true;
+}
+
+bool vex_init(vex_ctx* ctx, vex_init_info init_info) {
+	if (!ctx) { return false; }
+	ctx->name = _vex_strdup(init_info.name);
+	ctx->help_msg = NULL;
+	ctx->status_msg = NULL;
+	ctx->description = _vex_strdup(init_info.description);
+	ctx->version = _vex_strdup(init_info.version);
+	ctx->arg_desc = NULL;
+	ctx->num_arg_desc = 0;
+	ctx->capacity_arg_desc = 0;
+	ctx->arg_token = NULL;
+	ctx->num_arg_token = 0;
+	ctx->capacity_arg_token = 0;
+	ctx->status = VEX_STATUS_OK;
 
 	// Validate
-	if (!ctx.name || !ctx.description || !ctx.version) {
-		_vex_set_status(&ctx, VEX_STATUS_BAD_ALLOC, NULL);
-		return ctx;
+	if (!ctx->name || !ctx->description || !ctx->version) {
+		_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
+		return false;
 	}
 
 	// Add default arguments
@@ -152,7 +229,7 @@ vex_ctx vex_init(vex_init_info init_info) {
 	arg_help_flag.short_name = 'h';
 	arg_help_flag.description = _vex_strdup("Print this help message");
 	arg_help_flag.max_count = 0;
-	vex_add_arg(&ctx, arg_help_flag);
+	vex_add_arg(ctx, arg_help_flag);
 
 	vex_arg_desc arg_ver_flag = { 0 };
 	arg_ver_flag.arg_type = VEX_ARG_TYPE_FLAG;
@@ -160,9 +237,9 @@ vex_ctx vex_init(vex_init_info init_info) {
 	arg_ver_flag.short_name = 'v';
 	arg_ver_flag.description = _vex_strdup("Print the version string");
 	arg_ver_flag.max_count = 0;
-	vex_add_arg(&ctx, arg_ver_flag);
+	vex_add_arg(ctx, arg_ver_flag);
 
-	return ctx;
+	return true;
 }
 
 bool vex_add_arg(vex_ctx* ctx, vex_arg_desc desc) {
@@ -522,63 +599,6 @@ const char* vex_get_help(vex_ctx* ctx) {
 	}
 	ctx->help_msg = buffer;
 	return ctx->help_msg;
-}
-
-char* _vex_strdup(const char* str) {
-	if (!str) return NULL;
-	size_t len = strlen(str);
-	char* dst = CPPCAST(char*)VEX_MALLOC(len + 1);
-	if (!dst) return NULL;
-	memcpy(dst, str, len + 1);
-	return dst;
-}
-
-bool _vex_add_token(vex_ctx* ctx, vex_arg_token token) {
-	// Resize arg token buffer if needed
-	while (ctx->num_arg_token >= ctx->capacity_arg_token) {
-		int new_capacity = ctx->capacity_arg_token * 2;
-		new_capacity += (new_capacity == 0);
-		vex_arg_token* temp = CPPCAST(vex_arg_token*)VEX_REALLOC(ctx->arg_token, new_capacity * sizeof(*temp));
-		if (!temp) {
-			_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
-			return false;
-		}
-		memset(&temp[ctx->capacity_arg_token], 0, (new_capacity - ctx->capacity_arg_token) * sizeof(*temp));
-		ctx->arg_token = temp;
-		ctx->capacity_arg_token = new_capacity;
-	}
-
-	// Save to buffer
-	ctx->arg_token[ctx->num_arg_token++] = token;
-	return true;
-}
-
-void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...) {
-	ctx->status = status;
-	if (status != VEX_STATUS_OK && status != VEX_STATUS_BAD_ALLOC && fmt) {
-		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
-		ctx->status_msg = CPPCAST(char*)VEX_MALLOC(256);
-		va_list args;
-		va_start(args, fmt);
-		vsnprintf(ctx->status_msg, 256, fmt, args);
-		va_end(args);
-	}
-	else {
-		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
-		ctx->status_msg = NULL;
-	}
-}
-
-bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value) {
-	// Resize token value buffer
-	vex_value* temp = CPPCAST(vex_value*)VEX_REALLOC(token->arg, (token->arg_count + 1) * sizeof(*token->arg));
-	if (!temp) {
-		_vex_set_status(ctx, VEX_STATUS_BAD_ALLOC, NULL);
-		return false;
-	}
-	token->arg = temp;
-	token->arg[token->arg_count++] = value;
-	return true;
 }
 
 #endif
