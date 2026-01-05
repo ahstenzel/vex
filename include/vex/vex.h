@@ -153,6 +153,22 @@ static char* _vex_strdup(const char* str) {
 	return dst;
 }
 
+static void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...) {
+	ctx->status = status;
+	if (status != VEX_STATUS_OK && status != VEX_STATUS_BAD_ALLOC && fmt) {
+		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
+		ctx->status_msg = CPPCAST(char*)VEX_MALLOC(256);
+		va_list args;
+		va_start(args, fmt);
+		vsnprintf(ctx->status_msg, 256, fmt, args);
+		va_end(args);
+	}
+	else {
+		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
+		ctx->status_msg = NULL;
+	}
+}
+
 static bool _vex_add_token(vex_ctx* ctx, vex_arg_token token) {
 	// Resize arg token buffer if needed
 	while (ctx->num_arg_token >= ctx->capacity_arg_token) {
@@ -171,22 +187,6 @@ static bool _vex_add_token(vex_ctx* ctx, vex_arg_token token) {
 	// Save to buffer
 	ctx->arg_token[ctx->num_arg_token++] = token;
 	return true;
-}
-
-static void _vex_set_status(vex_ctx* ctx, int status, const char* fmt, ...) {
-	ctx->status = status;
-	if (status != VEX_STATUS_OK && status != VEX_STATUS_BAD_ALLOC && fmt) {
-		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
-		ctx->status_msg = CPPCAST(char*)VEX_MALLOC(256);
-		va_list args;
-		va_start(args, fmt);
-		vsnprintf(ctx->status_msg, 256, fmt, args);
-		va_end(args);
-	}
-	else {
-		if (ctx->status_msg) VEX_FREE(ctx->status_msg);
-		ctx->status_msg = NULL;
-	}
 }
 
 static bool _vec_token_add_value(vex_ctx* ctx, vex_arg_token* token, vex_value value) {
