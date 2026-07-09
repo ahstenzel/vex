@@ -5,10 +5,10 @@
 
 class vex {
 public:
-	vex(const std::string& name, const std::string& version, const std::string description);
+	vex(const std::string& name, const std::string& version, const std::string description, bool disable_default_help_arg = false, bool disable_default_version_arg = false);
 	~vex();
 
-	bool add_arg(const std::string& description, int arg_type, const std::string& long_name, char short_name);
+	bool add_arg(const std::string& description, int arg_type, const std::string& long_name, char short_name, int max_count = -1);
 
 	bool parse(int argc, char** argv);
 
@@ -17,6 +17,10 @@ public:
 	const vex_arg_token* get_token(int num);
 
 	bool arg_found(const std::string& name);
+
+	int get_status();
+
+	std::string get_status_msg();
 
 	std::string get_version();
 
@@ -196,11 +200,13 @@ vex::const_iterator vex::cend() const     { return end(); }
 
 vex::const_riterator vex::crend() const   { return rend(); }
 
-vex::vex(const std::string& name, const std::string& version, const std::string description) {
+vex::vex(const std::string& name, const std::string& version, const std::string description, bool disable_default_help_arg, bool disable_default_version_arg) {
 	vex_init_info info = { 0 };
 	info.name = name.c_str();
 	info.version = version.c_str();
 	info.description = description.c_str();
+	info.disable_default_help_arg = disable_default_help_arg;
+	info.disable_default_version_arg = disable_default_version_arg;
 	vex_init(&ctx, info);
 }
 
@@ -208,12 +214,13 @@ vex::~vex() {
 	vex_free(&ctx);
 }
 
-bool vex::add_arg(const std::string& description, int arg_type, const std::string& long_name, char short_name) {
+bool vex::add_arg(const std::string& description, int arg_type, const std::string& long_name, char short_name, int max_count) {
 	vex_arg_desc desc = { 0 };
 	desc.arg_type = arg_type;
 	desc.description = const_cast<char*>(description.c_str());
 	desc.long_name = const_cast<char*>(long_name.c_str());
 	desc.short_name = short_name;
+	desc.max_count = max_count;
 	return vex_add_arg(&ctx, desc);
 }
 
@@ -231,6 +238,14 @@ const vex_arg_token* vex::get_token(int num) {
 
 bool vex::arg_found(const std::string& name) {
 	return vex_arg_found(&ctx, name.c_str());
+}
+
+int vex::get_status() {
+	return ctx.status;
+}
+
+std::string vex::get_status_msg() {
+	return std::string(ctx.status_msg);
 }
 
 std::string vex::get_version() {

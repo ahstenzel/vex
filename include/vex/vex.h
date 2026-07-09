@@ -85,6 +85,8 @@ typedef struct {
 	const char* name;
 	const char* version;
 	const char* description;
+	bool disable_default_version_arg;
+	bool disable_default_help_arg;
 } vex_init_info;
 
 typedef union {
@@ -223,21 +225,24 @@ bool vex_init(vex_ctx* ctx, vex_init_info init_info) {
 	}
 
 	// Add default arguments
-	vex_arg_desc arg_help_flag = { 0 };
-	arg_help_flag.arg_type = VEX_ARG_TYPE_FLAG;
-	arg_help_flag.long_name = _vex_strdup("help");
-	arg_help_flag.short_name = 'h';
-	arg_help_flag.description = _vex_strdup("Print this help message");
-	arg_help_flag.max_count = 0;
-	vex_add_arg(ctx, arg_help_flag);
-
-	vex_arg_desc arg_ver_flag = { 0 };
-	arg_ver_flag.arg_type = VEX_ARG_TYPE_FLAG;
-	arg_ver_flag.long_name = _vex_strdup("version");
-	arg_ver_flag.short_name = 'v';
-	arg_ver_flag.description = _vex_strdup("Print the version string");
-	arg_ver_flag.max_count = 0;
-	vex_add_arg(ctx, arg_ver_flag);
+	if (!init_info.disable_default_help_arg) {
+		vex_arg_desc arg_help_flag = { 0 };
+		arg_help_flag.arg_type = VEX_ARG_TYPE_FLAG;
+		arg_help_flag.long_name = _vex_strdup("help");
+		arg_help_flag.short_name = 'h';
+		arg_help_flag.description = _vex_strdup("Print this help message");
+		arg_help_flag.max_count = 0;
+		vex_add_arg(ctx, arg_help_flag);
+	}
+	if (!init_info.disable_default_version_arg) {
+		vex_arg_desc arg_ver_flag = { 0 };
+		arg_ver_flag.arg_type = VEX_ARG_TYPE_FLAG;
+		arg_ver_flag.long_name = _vex_strdup("version");
+		arg_ver_flag.short_name = 'V';
+		arg_ver_flag.description = _vex_strdup("Print the version string");
+		arg_ver_flag.max_count = 0;
+		vex_add_arg(ctx, arg_ver_flag);
+	}
 
 	return true;
 }
@@ -435,7 +440,7 @@ bool vex_parse(vex_ctx* ctx, int argc, char** argv) {
 				vex_value value = { 0 };
 				vex_arg_token* token = &ctx->arg_token[last_token];
 				if (token->arg_type != type) {
-					_vex_set_status(ctx, VEX_STATUS_BAD_VALUE, "Unexpected value");
+					_vex_set_status(ctx, VEX_STATUS_BAD_VALUE, "Invalid token (%s); was expecting type %d, got type %d", arg, token->arg_type, type);
 					return false;
 				}
 				switch (type) {

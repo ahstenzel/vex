@@ -8,7 +8,7 @@ Features not currently supported:
 
 ## Integration
 ### Header
-All you need to do is include the `vex.h` in your build. Optionally you can include `vex_cpp.hpp`, which provides a C++ wrapper around the C interface. In one (and only one) source file, you will have to define the implementation macros to define all the functionality.
+The simplest integration method is to include the `vex.h` in your build. Optionally you can include `vex_cpp.hpp`, which provides a C++ wrapper around the C interface. In one (and only one) source file, you will have to define the implementation macros to define all the functionality.
 ```
 #define VEX_IMPLEMENTATION
 #include "vex/vex.h"
@@ -16,7 +16,7 @@ All you need to do is include the `vex.h` in your build. Optionally you can incl
 ```
 
 ### CMake
-This repo is set up in such a way that you can include it as a git submodule, then integrate it into your CMake build with `add_subdirectory`. In this case, it will generate a library file (`libvex.a`) with the function definitions- meaning you won't have to define `VEX_IMPLEMENTATION`, just include the header.
+Alternatively, this repo is set up in such a way that you can include it as a git submodule, then integrate it into your CMake build with `add_subdirectory`. In this case, it will generate a library file (`libvex.a`) with the function definitions- meaning you won't have to define `VEX_IMPLEMENTATION`, just include the header.
 
 Two options are also provided to control how the library is compiled: 
  * `VEX_BUILD_SHARED` to build as a shared library (defaults to `ON` if `BUILD_SHARED_LIBS` is `ON`, otherwise defaults to `OFF`)
@@ -25,6 +25,7 @@ Two options are also provided to control how the library is compiled:
 set(VEX_BUILD_SHARED OFF) # Build static library
 set(VEX_BUILD_CPP ON)     # Build C++ wrapper
 add_subdirectory(vex)
+target_link_libraries(myapp PUBLIC vex)
 ```
 
 ## Usage
@@ -36,9 +37,12 @@ Create a context with `vex_init`:
 vex_init_info parser_info = {
 	.name = "myapp",
 	.description = "Your app description here",
-	.version = "1.0"
+	.version = "1.0.0",
+	.disable_default_help_arg = false,
+	.disable_default_version_arg = false
 };
-vex_ctx parser = vex_init(parser_info);
+vex_ctx parser = { 0 }; 
+vex_init(&parser, parser_info);
 ```
 Add arguments to the parser with `vex_add_arg`:
 ```
@@ -49,10 +53,11 @@ Add arguments to the parser with `vex_add_arg`:
  * VEX_ARG_TYPE_STR: String
  */
 vex_arg_desc arg_testflag = {
-	.arg_type = VEX_ARG_TYPE_FLAG,
-	.long_name = "flag",
-	.short_name = 'f',
-	.description = "A simple flag"
+	.arg_type = VEX_ARG_TYPE_FLAG,   // What type this argument should be
+	.long_name = "flag",             // The long name of the argument when invoked with '--' (Optional, can be NULL)
+	.short_name = 'f',               // The short name of the argument when invoked with '-' (Optional, can be '\0')
+	.description = "A simple flag",  // The description of this argument
+	.max_count = 0                   // The max number of arguments to group with this one (-1 for no limit)
 };
 vex_add_arg(&parser, arg_testflag);
 ```
@@ -82,9 +87,9 @@ vex_free(&parser);
 ```
 
 ### Built-in flags
-When initializing the library, it automatically adds two flags: `-h / --help` and `-v / --version`. You can retrieve the text generated for these two flags with `vex_get_help` and `vex_get_version` respectively.
+When initializing the library, it automatically adds two flags: `-h / --help` and `-V / --version`. You can retrieve the text generated for these two flags with `vex_get_help` and `vex_get_version` respectively.
 ```
-if (vex_arg_found(&parser, "v")) {
+if (vex_arg_found(&parser, "V")) {
 	const char* ver = vex_get_version(&parser);
 	printf(ver); // 1.0
 	return 0;
@@ -95,10 +100,21 @@ if (vex_arg_found(&parser, "h")) {
 	return 0;
 }
 ```
-Note that the strings returned by these functions are still owned by the library and should not be freed by the user.
+> Note that the strings returned by these functions are still owned by the library and should not be freed by the user.
+If you don't want these to be generated automatically, simply set the corresponding disable flags to true when initializing the context.
+```
+vex_init_info parser_info = {
+	.name = "myapp",
+	.description = "Your app description here",
+	.version = "1.0"
+	.disable_default_help_arg = true,
+	.disable_default_version_arg = true
+};
+```
+
 
 ### Multiple arguments per token
-When passing a set of arguments like `myapp -i input1.txt input2.txt`, both arguments (`input1.txt` and `input2.txt`) will be grouped together under the same token associated with the `-i` argument. 
+When passing a set of arguments like `myapp -i input1.txt input2.txt`, both arguments (`input1.txt` and `input2.txt`) will be grouped together under the same token associated with `-i`. To define a maximum number of arguments that can be grouped like this, use the `max_count` property in the `vex_arg_desc` struct when adding an argument. A value of 0 will not allow any grouping in this way; a negative value will mean there is no limit to the number of grouped arguments.
 
 The number of arguments under a token is stored in the `arg_count` property. The actual values are stored in `args`, an array of unions representing possible value types. The type of arguments for this token (and therefore which union member to access) is stored in the `arg_type` property.
 ```
@@ -115,13 +131,13 @@ for(int i = 0; i < vex_token_count(&parser); ++i) {
 		}
 	}
 }
-// Will print:
-// 0: input1.txt
-// 1: input2.txt
+// When invoked as 'myapp -i input1.txt input2.txt', will print:
+// Arg 0: input1.txt
+// Arg 1: input2.txt
 ```
 
 ### Error handling
-Most function will return a bool that indicates if the action was successful. The context object also has a `status` property that can be checked, as well as an `error_msg` property containing a more detailed error string.
+Most function will return a bool that indicates if the action was successful. The context object also has a `status` property that can be checked, as well as an `status_msg` property containing a more detailed error string.
 
 Status codes:
  * `VEX_STATUS_OK`: No error
@@ -138,4 +154,34 @@ The library provides hooks to allow for custom memory allocators. These come in 
 #define VEX_REALLOC custom_realloc
 #define VEX_FREE custom_free
 #include "vex/vex.h"
+```
+
+### C++ Wrapper
+The C++ wrapper is a small class that manages the life of the vex context, converts character arrays to standard strings, and provides an interator interface
+for parsed arguments. In general, the workflow is very similar to the C interface.
+```
+// Create context
+vex parser("myapp", "Your app description here", "1.0.0");
+
+// Add flags
+parser.add_arg("A simple flag", VEX_ARG_TYPE_FLAG, "flag", 'f');
+parser.add_arg("Input files", VEX_ARG_TYPE_STR, "input", 'i');
+
+// Parse tokens
+parser.parse(argc, argv);
+
+// Iterate through parsed tokens
+for(auto& token : parser) {
+	if (token.short_name == 'f') {
+		std::cout << "Flag found!" << std::endl;
+		return 0;
+	}
+	else if (token.short_name == 'i') {
+		for(int i = 0; i < token.arg_count, ++i) {
+			// We know 'i' takes string-type arguments
+			std::cout << "Arg " << i << ": " << token.arg[0].str_arg << std::endl;
+		}
+		return 0;
+	}
+}
 ```
